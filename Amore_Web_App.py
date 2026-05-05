@@ -3,6 +3,7 @@ import mysql.connector
 import pandas as pd
 from datetime import datetime, timedelta
 import urllib.parse
+import os
 
 # --- Page Config ---
 st.set_page_config(page_title="Amore Transient Apartment", layout="wide", page_icon="🏠")
@@ -116,7 +117,15 @@ def check_overlap(unit, in_dt, out_dt, exclude_id=None):
 
 # --- Sidebar ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/619/619034.png", width=70)
+    # --- LOGO SECTION ---
+    # To use your own photo: Upload it to GitHub as 'ATA_FB_LOGO.png' in the same folder as this script.
+    # The code below will automatically check if the file exists!
+    if os.path.exists("ATA_FB_LOGO.png"):
+        st.image("ATA_FB_LOGO.png", width=150)
+    else:
+        # Fallback to a nice high-quality house icon if no logo.png is found
+        st.image("https://cdn-icons-png.flaticon.com/512/619/619034.png", width=100)
+    
     st.write("Logged in: **Business Admin**")
     
     if st.button("Logout", use_container_width=True):
@@ -258,4 +267,4 @@ try:
 except Exception as e:
     st.error(f"System Error: {e}")
 
-st.caption("Amore Transient Apartment v2.9 | Secured & Live")
+st.caption("Amore Transient Apartment v3.0 | Secured & Live")
