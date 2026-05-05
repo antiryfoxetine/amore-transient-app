@@ -223,7 +223,7 @@ with st.sidebar:
         if st.button("❌ Clear Form", use_container_width=True):
             st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
     
-    st.caption("v3.5 | Long-term Status Support")
+    st.caption("v3.6 | Detailed Booking View")
 
 # --- Main Dashboard ---
 try:
@@ -259,30 +259,34 @@ try:
         
         ctrl1, ctrl2, ctrl3 = st.columns([2, 1, 1])
         search = ctrl1.text_input("🔍 Search Table")
-        sort_map = {"Unit": "unit_room", "Guest": "guest_name", "Check In": "checkin_dt_obj", "Status": "status"}
+        sort_map = {"Unit": "unit_room", "Guest": "guest_name", "Status": "status"}
         sort_by = ctrl2.selectbox("Sort By", list(sort_map.keys()))
         sort_order = ctrl3.selectbox("Order", ["Ascending", "Descending"])
 
         df['checkin_dt_obj'] = pd.to_datetime(df['checkin_date'], format='%m-%d-%Y')
-        df['CHECK IN'] = df['checkin_date'] + " @ " + df['checkin_time']
-        df['CHECK OUT'] = df.apply(lambda x: "LONG-TERM" if x['checkout_date'] == "Long-term" else f"{x['checkout_date']} @ {x['checkout_time']}", axis=1)
-
         if search:
             df = df[df['guest_name'].str.contains(search, case=False) | df['unit_room'].str.contains(search, case=False)]
         
-        df = df.sort_values(by=sort_map[sort_by], ascending=(sort_order == "Ascending"))
+        df = df.sort_values(by=sort_map.get(sort_by, 'checkin_dt_obj'), ascending=(sort_order == "Ascending"))
 
+        # Reverting to separated columns as requested
         display_df = df[[
             'unit_room', 
             'guest_name', 
             'phone_number', 
-            'CHECK IN', 
-            'CHECK OUT', 
+            'checkin_date',
+            'checkin_time',
+            'checkout_date',
+            'checkout_time',
             'status'
         ]].rename(columns={
             'unit_room': 'UNIT',
             'guest_name': 'GUEST',
             'phone_number': 'PHONE NUMBER',
+            'checkin_date': 'CHECK IN DATE',
+            'checkin_time': 'CHECK IN TIME',
+            'checkout_date': 'CHECK OUT DATE',
+            'checkout_time': 'CHECK OUT TIME',
             'status': 'STATUS'
         })
         
@@ -328,4 +332,4 @@ try:
 except Exception as e:
     st.error(f"System Error: {e}")
 
-st.caption("Amore Transient Apartment v3.5 | Professional Business View")
+st.caption("Amore Transient Apartment v3.6 | Professional Business View")
