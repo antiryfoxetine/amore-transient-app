@@ -26,11 +26,18 @@ def get_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
 # --- Google Calendar Link Generator ---
-def get_google_cal_link(guest, phone, unit, start_dt, end_dt):
+def get_google_cal_link(guest, phone, unit, start_dt, end_dt, is_long_term=False):
     base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
     fmt = "%Y%m%dT%H%M%S"
-    event_name = f"AMORE: {guest} ({unit})"
-    details = f"Guest: {guest}\nPhone: {phone}\nUnit: {unit}\nStatus: Confirmed\n\nSynced via Amore Business Cloud"
+    
+    if is_long_term:
+        end_dt = start_dt + timedelta(days=30)
+        event_name = f"LONG-TERM: {guest} ({unit})"
+    else:
+        event_name = f"AMORE: {guest} ({unit})"
+        
+    details = f"Guest: {guest}\nPhone: {phone}\nUnit: {unit}\nType: Long-term Rental" if is_long_term else f"Guest: {guest}\nPhone: {phone}\nUnit: {unit}"
+    details += "\n\nSynced via Amore Business Cloud"
     
     params = {
         "text": event_name,
@@ -102,7 +109,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- Overlap Logic (2-Hour Cleaning Gap) ---
-def check_overlap(unit, in_dt, out_dt, exclude_id=None):
+def check_overlap(unit, in_dt, out_dt, exclude_id=None, is_long_term=False):
     buffer = timedelta(hours=2)
     try:
         conn = get_connection()
@@ -116,9 +123,20 @@ def check_overlap(unit, in_dt, out_dt, exclude_id=None):
 
         for row in rows:
             exist_in = datetime.strptime(f"{row['checkin_date']} {row['checkin_time']}", "%m-%d-%Y %I:%M %p")
+            
+            if row['checkout_date'] == "Long-term" or row['status'] == "Long-term":
+                if out_dt > exist_in - buffer:
+                    return f"CONFLICT: Unit {unit} has a Long-term resident ({row['guest_name']})."
+                continue
+
             exist_out = datetime.strptime(f"{row['checkout_date']} {row['checkout_time']}", "%m-%d-%Y %I:%M %p")
-            if (in_dt < exist_out + buffer) and (out_dt > exist_in - buffer):
-                return f"CONFLICT: Unit {unit} is busy with {row['guest_name']}. 2-hour cleaning gap required!"
+            
+            if is_long_term:
+                if in_dt < exist_out + buffer:
+                    return f"CONFLICT: Unit {unit} is busy with {row['guest_name']} until {row['checkout_date']}."
+            else:
+                if (in_dt < exist_out + buffer) and (out_dt > exist_in - buffer):
+                    return f"CONFLICT: Unit {unit} is busy with {row['guest_name']}. 2-hour cleaning gap required!"
         return None
     except: return None
 
@@ -154,22 +172,36 @@ with st.sidebar:
         in_date = c1.date_input("Check-in")
         in_time = c2.time_input("Time", value=datetime.strptime("14:00", "%H:%M").time())
         
-        c3, c4 = st.columns(2)
-        out_date = c3.date_input("Check-out")
-        out_time = c4.time_input("Time", value=datetime.strptime("12:00", "%H:%M").time())
+        # --- Long Term Toggle ---
+        is_lt_val = (st.session_state.edit_val.get('status') == "Long-term" or st.session_state.edit_val.get('checkout_date') == "Long-term")
+        is_long_term = st.checkbox("Long-term Rental (No fixed check-out)", value=is_lt_val)
         
-        status_opts = ["Reserved", "Booked", "Checked-in", "Checked-out"]
-        curr_status = st.session_state.edit_val.get('status', "Reserved")
+        c3, c4 = st.columns(2)
+        out_date = c3.date_input("Check-out", disabled=is_long_term)
+        out_time = c4.time_input("Time", value=datetime.strptime("12:00", "%H:%M").time(), disabled=is_long_term)
+        
+        status_opts = ["Reserved", "Booked", "Checked-in", "Checked-out", "Long-term"]
+        curr_status = "Long-term" if is_long_term else st.session_state.edit_val.get('status', "Reserved")
         def_idx = status_opts.index(curr_status) if curr_status in status_opts else 0
-        status = st.selectbox("Status", status_opts, index=def_idx)
+        status = st.selectbox("Status", status_opts, index=def_idx, disabled=is_long_term)
         
         btn_label = "UPDATE CLOUD" if st.session_state.edit_id else "SAVE TO CLOUD"
         if st.form_submit_button(btn_label, use_container_width=True):
             if guest and unit:
                 start_dt = datetime.combine(in_date, in_time)
-                end_dt = datetime.combine(out_date, out_time)
                 
-                conflict = check_overlap(unit, start_dt, end_dt, exclude_id=st.session_state.edit_id)
+                if is_long_term:
+                    end_dt = start_dt + timedelta(days=3650) 
+                    cout_d_str = "Long-term"
+                    cout_t_str = "N/A"
+                    final_status = "Long-term"
+                else:
+                    end_dt = datetime.combine(out_date, out_time)
+                    cout_d_str = end_dt.strftime("%m-%d-%Y")
+                    cout_t_str = end_dt.strftime("%I:%M %p")
+                    final_status = status
+                
+                conflict = check_overlap(unit, start_dt, end_dt, exclude_id=st.session_state.edit_id, is_long_term=is_long_term)
                 if conflict:
                     st.error(conflict)
                 else:
@@ -177,10 +209,10 @@ with st.sidebar:
                         conn = get_connection(); cursor = conn.cursor()
                         if st.session_state.edit_id:
                             sql = "UPDATE bookings SET guest_name=%s, phone_number=%s, unit_room=%s, checkin_date=%s, checkin_time=%s, checkout_date=%s, checkout_time=%s, status=%s WHERE id=%s"
-                            cursor.execute(sql, (guest, phone, unit, start_dt.strftime("%m-%d-%Y"), start_dt.strftime("%I:%M %p"), end_dt.strftime("%m-%d-%Y"), end_dt.strftime("%I:%M %p"), status, st.session_state.edit_id))
+                            cursor.execute(sql, (guest, phone, unit, start_dt.strftime("%m-%d-%Y"), start_dt.strftime("%I:%M %p"), cout_d_str, cout_t_str, final_status, st.session_state.edit_id))
                         else:
                             sql = "INSERT INTO bookings (guest_name, phone_number, unit_room, checkin_date, checkin_time, checkout_date, checkout_time, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
-                            cursor.execute(sql, (guest, phone, unit, start_dt.strftime("%m-%d-%Y"), start_dt.strftime("%I:%M %p"), end_dt.strftime("%m-%d-%Y"), end_dt.strftime("%I:%M %p"), status))
+                            cursor.execute(sql, (guest, phone, unit, start_dt.strftime("%m-%d-%Y"), start_dt.strftime("%I:%M %p"), cout_d_str, cout_t_str, final_status))
                         conn.commit(); conn.close()
                         st.success("Synced!")
                         st.session_state.edit_id = None; st.session_state.edit_val = {}
@@ -191,7 +223,7 @@ with st.sidebar:
         if st.button("❌ Clear Form", use_container_width=True):
             st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
     
-    st.caption("v3.3 | Optimized Layout")
+    st.caption("v3.5 | Long-term Status Support")
 
 # --- Main Dashboard ---
 try:
@@ -200,12 +232,13 @@ try:
     conn.close()
 
     if not df.empty:
-        # Metrics
-        m1, m2, m3, m4 = st.columns(4)
+        # Metrics Row
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Occupied", len(df[df['status'] == 'Checked-in']))
         m2.metric("Upcoming", len(df[df['status'] == 'Reserved']))
-        m3.metric("Total Records", len(df))
+        m3.metric("Monthly Tenants", len(df[df['status'] == 'Long-term']))
         m4.metric("Active Units", df[df['status'] != 'Checked-out']['unit_room'].nunique())
+        m5.metric("Total Records", len(df))
 
         st.divider()
         c_left, c_right = st.columns([2, 1])
@@ -230,17 +263,15 @@ try:
         sort_by = ctrl2.selectbox("Sort By", list(sort_map.keys()))
         sort_order = ctrl3.selectbox("Order", ["Ascending", "Descending"])
 
-        # Create display columns
         df['checkin_dt_obj'] = pd.to_datetime(df['checkin_date'], format='%m-%d-%Y')
         df['CHECK IN'] = df['checkin_date'] + " @ " + df['checkin_time']
-        df['CHECK OUT'] = df['checkout_date'] + " @ " + df['checkout_time']
+        df['CHECK OUT'] = df.apply(lambda x: "LONG-TERM" if x['checkout_date'] == "Long-term" else f"{x['checkout_date']} @ {x['checkout_time']}", axis=1)
 
         if search:
             df = df[df['guest_name'].str.contains(search, case=False) | df['unit_room'].str.contains(search, case=False)]
         
         df = df.sort_values(by=sort_map[sort_by], ascending=(sort_order == "Ascending"))
 
-        # Select and rename in the specific order requested
         display_df = df[[
             'unit_room', 
             'guest_name', 
@@ -270,8 +301,14 @@ try:
             row = df[df['id'] == target_id].iloc[0]
             
             s_dt = datetime.strptime(f"{row['checkin_date']} {row['checkin_time']}", "%m-%d-%Y %I:%M %p")
-            e_dt = datetime.strptime(f"{row['checkout_date']} {row['checkout_time']}", "%m-%d-%Y %I:%M %p")
-            cal_link = get_google_cal_link(row['guest_name'], row['phone_number'], row['unit_room'], s_dt, e_dt)
+            is_lt = (row['status'] == "Long-term" or row['checkout_date'] == "Long-term")
+            
+            if is_lt:
+                e_dt = s_dt + timedelta(days=30)
+            else:
+                e_dt = datetime.strptime(f"{row['checkout_date']} {row['checkout_time']}", "%m-%d-%Y %I:%M %p")
+            
+            cal_link = get_google_cal_link(row['guest_name'], row['phone_number'], row['unit_room'], s_dt, e_dt, is_long_term=is_lt)
             
             q2.markdown(f'<a href="{cal_link}" target="_blank" style="text-decoration:none;"><button style="width:100%; height:45px; border-radius:10px; background-color:#4285F4; color:white; border:none; cursor:pointer; font-weight:bold;">📅 SYNC TO AMORE GMAIL</button></a>', unsafe_allow_html=True)
             
@@ -291,4 +328,4 @@ try:
 except Exception as e:
     st.error(f"System Error: {e}")
 
-st.caption("Amore Transient Apartment v3.3 | Professional Business View")
+st.caption("Amore Transient Apartment v3.5 | Professional Business View")
