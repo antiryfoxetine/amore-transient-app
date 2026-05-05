@@ -118,10 +118,10 @@ def check_overlap(unit, in_dt, out_dt, exclude_id=None):
 # --- Sidebar ---
 with st.sidebar:
     # --- LOGO SECTION ---
-    # To use your own photo: Upload it to GitHub as 'ATA_FB_LOGO.png' in the same folder as this script.
+    # To use your own photo: Upload it to GitHub as 'logo.png' in the same folder as this script.
     # The code below will automatically check if the file exists!
-    if os.path.exists("ATA_FB_LOGO.png"):
-        st.image("ATA_FB_LOGO.png", width=150)
+    if os.path.exists("logo.png"):
+        st.image("logo.png", width=150)
     else:
         # Fallback to a nice high-quality house icon if no logo.png is found
         st.image("https://cdn-icons-png.flaticon.com/512/619/619034.png", width=100)
