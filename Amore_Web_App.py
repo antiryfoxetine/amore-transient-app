@@ -8,7 +8,6 @@ import urllib.parse
 st.set_page_config(page_title="Amore Transient Apartment", layout="wide", page_icon="🏠")
 
 # --- DATABASE & AUTH CONFIGURATION (SECURE) ---
-# Pulling from Streamlit Cloud Secrets to keep your GitHub safe
 try:
     DB_CONFIG = {
         'host': st.secrets["mysql"]["host"],
@@ -26,11 +25,11 @@ def get_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
 # --- Google Calendar Link Generator ---
-def get_google_cal_link(guest, unit, start_dt, end_dt):
+def get_google_cal_link(guest, phone, unit, start_dt, end_dt):
     base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
     fmt = "%Y%m%dT%H%M%S"
     event_name = f"AMORE: {guest} ({unit})"
-    details = f"Guest: {guest}\nUnit: {unit}\nStatus: Confirmed\n\nSynced via Amore Business Cloud"
+    details = f"Guest: {guest}\nPhone: {phone}\nUnit: {unit}\nStatus: Confirmed\n\nSynced via Amore Business Cloud"
     
     params = {
         "text": event_name,
@@ -47,20 +46,21 @@ if "logged_in" not in st.session_state:
 if not st.session_state.logged_in:
     st.markdown("""
         <div style="text-align: center; padding: 50px;">
-            <h1 style="color: #507d00;">🏠 AMORE TRANSIENT APARTMENT</h1>
-            <p>Please enter the staff password to access the business portal.</p>
+            <h1 style="color: #507d00; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">🏠 AMORE TRANSIENT APARTMENT</h1>
+            <p style="color: #666;">Secure Management Portal</p>
         </div>
     """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
-        pwd = st.text_input("Staff Password", type="password")
-        if st.button("Access Dashboard", use_container_width=True):
-            if pwd == APP_PASSWORD:
-                st.session_state.logged_in = True
-                st.rerun()
-            else:
-                st.error("Incorrect password.")
+        with st.form("login_form"):
+            pwd = st.text_input("Enter Staff Password", type="password")
+            if st.form_submit_button("Access Dashboard", use_container_width=True):
+                if pwd == APP_PASSWORD:
+                    st.session_state.logged_in = True
+                    st.rerun()
+                else:
+                    st.error("Incorrect password.")
     st.stop()
 
 # --- Custom Styling ---
@@ -84,11 +84,12 @@ st.markdown("""
     div[data-testid="stForm"] {
         border-radius: 15px;
         background-color: white;
+        border: 1px solid #eee;
     }
     </style>
     <div class="main-header">
         <h1 style="margin:0;">AMORE TRANSIENT APARTMENT</h1>
-        <p style="margin:0; opacity: 0.8;">Amore Business Gmail Sync Portal</p>
+        <p style="margin:0; opacity: 0.8;">Business Management & Calendar Sync</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -118,13 +119,13 @@ with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/619/619034.png", width=70)
     st.write("Logged in: **Business Admin**")
     
-    if st.button("Logout"):
+    if st.button("Logout", use_container_width=True):
         st.session_state.logged_in = False
         st.rerun()
     
     st.divider()
-    # Direct link to your Google Calendar
     st.markdown("[🗓️ View Google Calendar](https://calendar.google.com/calendar/u/0/r/month)", unsafe_allow_html=True)
+    st.caption("Tip: Keep this tab open to avoid logging in again.")
     st.divider()
     
     if "edit_id" not in st.session_state: st.session_state.edit_id = None
@@ -151,7 +152,7 @@ with st.sidebar:
         status = st.selectbox("Status", status_opts, index=def_idx)
         
         btn_label = "UPDATE CLOUD" if st.session_state.edit_id else "SAVE TO CLOUD"
-        if st.form_submit_button(btn_label):
+        if st.form_submit_button(btn_label, use_container_width=True):
             if guest and unit:
                 start_dt = datetime.combine(in_date, in_time)
                 end_dt = datetime.combine(out_date, out_time)
@@ -169,13 +170,13 @@ with st.sidebar:
                             sql = "INSERT INTO bookings (guest_name, phone_number, unit_room, checkin_date, checkin_time, checkout_date, checkout_time, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
                             cursor.execute(sql, (guest, phone, unit, start_dt.strftime("%m-%d-%Y"), start_dt.strftime("%I:%M %p"), end_dt.strftime("%m-%d-%Y"), end_dt.strftime("%I:%M %p"), status))
                         conn.commit(); conn.close()
-                        st.success("Synced with Aiven Cloud!")
+                        st.success("Synced!")
                         st.session_state.edit_id = None; st.session_state.edit_val = {}
                         st.rerun()
                     except Exception as e: st.error(e)
 
     if st.session_state.edit_id or any(st.session_state.edit_val.values()):
-        if st.button("❌ Clear Form / Cancel Edit", use_container_width=True):
+        if st.button("❌ Clear Form", use_container_width=True):
             st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
 
 # --- Main Dashboard ---
@@ -196,25 +197,25 @@ try:
         st.divider()
         c_left, c_right = st.columns([2, 1])
         with c_left:
-            st.subheader("📈 Occupancy Analytics")
+            st.subheader("📈 Occupancy Insights")
             unit_counts = df['unit_room'].value_counts()
             st.bar_chart(unit_counts, color="#507d00")
         
         with c_right:
-            st.subheader("📊 Business Tools")
+            st.subheader("📊 Business Data")
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Export to Excel/CSV", data=csv, file_name="amore_records.csv", mime="text/csv", use_container_width=True)
-            st.info("Regularly export this for your backup records.")
+            st.info("Download monthly for your records.")
 
-        # Table with Sorting
+        # Table with Search/Sort
         st.divider()
         st.subheader("📋 Booking Ledger")
         
-        ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 1, 1])
-        search = ctrl_col1.text_input("🔍 Search Guest or Unit")
+        ctrl1, ctrl2, ctrl3 = st.columns([2, 1, 1])
+        search = ctrl1.text_input("🔍 Search Guest or Unit")
         sort_map = {"ID": "id", "Name": "guest_name", "Unit": "unit_room", "Check-in": "checkin_dt_obj"}
-        sort_by = ctrl_col2.selectbox("Sort By", list(sort_map.keys()))
-        sort_order = ctrl_col3.selectbox("Order", ["Descending", "Ascending"])
+        sort_by = ctrl2.selectbox("Sort By", list(sort_map.keys()))
+        sort_order = ctrl3.selectbox("Order", ["Descending", "Ascending"])
 
         df['checkin_dt_obj'] = pd.to_datetime(df['checkin_date'], format='%m-%d-%Y')
         if search:
@@ -229,16 +230,15 @@ try:
         q1, q2, q3 = st.columns([2, 1, 1])
         
         booking_options = {f"{r['guest_name']} - Unit {r['unit_room']} (ID: {r['id']})": r['id'] for _, r in df.iterrows()}
-        selected_label = q1.selectbox("Select booking to manage", ["-- Select Guest --"] + list(booking_options.keys()))
+        selected_label = q1.selectbox("Choose a record", ["-- Select Guest --"] + list(booking_options.keys()))
         
         if selected_label != "-- Select Guest --":
             target_id = booking_options[selected_label]
             row = df[df['id'] == target_id].iloc[0]
             
-            # Link to Sync
             s_dt = datetime.strptime(f"{row['checkin_date']} {row['checkin_time']}", "%m-%d-%Y %I:%M %p")
             e_dt = datetime.strptime(f"{row['checkout_date']} {row['checkout_time']}", "%m-%d-%Y %I:%M %p")
-            cal_link = get_google_cal_link(row['guest_name'], row['unit_room'], s_dt, e_dt)
+            cal_link = get_google_cal_link(row['guest_name'], row['phone_number'], row['unit_room'], s_dt, e_dt)
             
             q2.markdown(f'<a href="{cal_link}" target="_blank" style="text-decoration:none;"><button style="width:100%; height:45px; border-radius:10px; background-color:#4285F4; color:white; border:none; cursor:pointer; font-weight:bold;">📅 SYNC TO AMORE GMAIL</button></a>', unsafe_allow_html=True)
             
@@ -254,8 +254,8 @@ try:
                 st.rerun()
 
     else:
-        st.info("The cloud database is currently empty.")
+        st.info("Cloud database is empty.")
 except Exception as e:
     st.error(f"System Error: {e}")
 
-st.caption("Amore Transient Apartment v2.8 | Secure Business Portal")
+st.caption("Amore Transient Apartment v2.9 | Secured & Live")
