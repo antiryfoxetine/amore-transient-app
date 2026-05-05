@@ -192,8 +192,7 @@ with st.sidebar:
         if st.button("❌ Clear Form", use_container_width=True):
             st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
     
-    st.v_spacer(size=2)
-    st.caption("v3.2 | Updated May 2026")
+    st.caption("v3.2.1 | Fixed Sidebar Crash")
 
 # --- Main Dashboard ---
 try:
@@ -274,4 +273,4 @@ try:
 except Exception as e:
     st.error(f"System Error: {e}")
 
-st.caption("Amore Transient Apartment v3.2 | Secured & Live")
+st.caption("Amore Transient Apartment v3.2.1 | Secured & Live")
