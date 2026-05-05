@@ -45,7 +45,6 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    # Display logo on login page if it exists
     col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
     with col_l2:
         if os.path.exists("logo.png"):
@@ -192,7 +191,7 @@ with st.sidebar:
         if st.button("❌ Clear Form", use_container_width=True):
             st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
     
-    st.caption("v3.2.1 | Fixed Sidebar Crash")
+    st.caption("v3.3 | Optimized Layout")
 
 # --- Main Dashboard ---
 try:
@@ -208,7 +207,6 @@ try:
         m3.metric("Total Records", len(df))
         m4.metric("Active Units", df[df['status'] != 'Checked-out']['unit_room'].nunique())
 
-        # Analytics & Export
         st.divider()
         c_left, c_right = st.columns([2, 1])
         with c_left:
@@ -222,22 +220,42 @@ try:
             st.download_button("📥 Export to Excel/CSV", data=csv, file_name="amore_records.csv", mime="text/csv", use_container_width=True)
             st.info("Download monthly for your records.")
 
-        # Table with Search/Sort
+        # --- TABLE FORMATTING ---
         st.divider()
         st.subheader("📋 Booking Ledger")
         
         ctrl1, ctrl2, ctrl3 = st.columns([2, 1, 1])
-        search = ctrl1.text_input("🔍 Search Guest or Unit")
-        sort_map = {"ID": "id", "Name": "guest_name", "Unit": "unit_room", "Check-in": "checkin_dt_obj"}
+        search = ctrl1.text_input("🔍 Search Table")
+        sort_map = {"Unit": "unit_room", "Guest": "guest_name", "Check In": "checkin_dt_obj", "Status": "status"}
         sort_by = ctrl2.selectbox("Sort By", list(sort_map.keys()))
-        sort_order = ctrl3.selectbox("Order", ["Descending", "Ascending"])
+        sort_order = ctrl3.selectbox("Order", ["Ascending", "Descending"])
 
+        # Create display columns
         df['checkin_dt_obj'] = pd.to_datetime(df['checkin_date'], format='%m-%d-%Y')
+        df['CHECK IN'] = df['checkin_date'] + " @ " + df['checkin_time']
+        df['CHECK OUT'] = df['checkout_date'] + " @ " + df['checkout_time']
+
         if search:
             df = df[df['guest_name'].str.contains(search, case=False) | df['unit_room'].str.contains(search, case=False)]
         
         df = df.sort_values(by=sort_map[sort_by], ascending=(sort_order == "Ascending"))
-        st.dataframe(df.drop(columns=['checkin_dt_obj']), use_container_width=True, hide_index=True)
+
+        # Select and rename in the specific order requested
+        display_df = df[[
+            'unit_room', 
+            'guest_name', 
+            'phone_number', 
+            'CHECK IN', 
+            'CHECK OUT', 
+            'status'
+        ]].rename(columns={
+            'unit_room': 'UNIT',
+            'guest_name': 'GUEST',
+            'phone_number': 'PHONE NUMBER',
+            'status': 'STATUS'
+        })
+        
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
         # Management Tools
         st.divider()
@@ -245,7 +263,7 @@ try:
         q1, q2, q3 = st.columns([2, 1, 1])
         
         booking_options = {f"{r['guest_name']} - Unit {r['unit_room']} (ID: {r['id']})": r['id'] for _, r in df.iterrows()}
-        selected_label = q1.selectbox("Choose a record", ["-- Select Guest --"] + list(booking_options.keys()))
+        selected_label = q1.selectbox("Select a guest to manage", ["-- Select Guest --"] + list(booking_options.keys()))
         
         if selected_label != "-- Select Guest --":
             target_id = booking_options[selected_label]
@@ -273,4 +291,4 @@ try:
 except Exception as e:
     st.error(f"System Error: {e}")
 
-st.caption("Amore Transient Apartment v3.2.1 | Secured & Live")
+st.caption("Amore Transient Apartment v3.3 | Professional Business View")
