@@ -223,7 +223,7 @@ with st.sidebar:
         if st.button("❌ Clear Form", use_container_width=True):
             st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
     
-    st.caption("v3.6 | Detailed Booking View")
+    st.caption("v3.6.1 | Restore Sorting Options")
 
 # --- Main Dashboard ---
 try:
@@ -259,17 +259,31 @@ try:
         
         ctrl1, ctrl2, ctrl3 = st.columns([2, 1, 1])
         search = ctrl1.text_input("🔍 Search Table")
-        sort_map = {"Unit": "unit_room", "Guest": "guest_name", "Status": "status"}
+        
+        # RESTORED SORTING OPTIONS
+        sort_map = {
+            "Unit": "unit_room", 
+            "Guest": "guest_name", 
+            "Check In": "checkin_dt_obj", 
+            "Check Out": "checkout_dt_obj",
+            "Status": "status"
+        }
         sort_by = ctrl2.selectbox("Sort By", list(sort_map.keys()))
         sort_order = ctrl3.selectbox("Order", ["Ascending", "Descending"])
 
+        # Helper for date sorting
         df['checkin_dt_obj'] = pd.to_datetime(df['checkin_date'], format='%m-%d-%Y')
+        df['checkout_dt_obj'] = pd.to_datetime(
+            df['checkout_date'].replace('Long-term', '12-31-2099'), 
+            format='%m-%d-%Y'
+        )
+
         if search:
             df = df[df['guest_name'].str.contains(search, case=False) | df['unit_room'].str.contains(search, case=False)]
         
         df = df.sort_values(by=sort_map.get(sort_by, 'checkin_dt_obj'), ascending=(sort_order == "Ascending"))
 
-        # Reverting to separated columns as requested
+        # Display columns as requested
         display_df = df[[
             'unit_room', 
             'guest_name', 
@@ -332,4 +346,4 @@ try:
 except Exception as e:
     st.error(f"System Error: {e}")
 
-st.caption("Amore Transient Apartment v3.6 | Professional Business View")
+st.caption("Amore Transient Apartment v3.6.1 | Professional Business View")
