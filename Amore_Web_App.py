@@ -219,11 +219,13 @@ with st.sidebar:
                         st.rerun()
                     except Exception as e: st.error(e)
 
-    if st.session_state.edit_id or any(st.session_state.edit_val.values()):
-        if st.button("❌ Clear Form", use_container_width=True):
-            st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
+    # RESTORED: Clear Form button is now persistent and always visible
+    if st.button("❌ Clear Form", use_container_width=True):
+        st.session_state.edit_id = None
+        st.session_state.edit_val = {}
+        st.rerun()
     
-    st.caption("v3.6.1 | Restore Sorting Options")
+    st.caption("v3.6.2 | Persistent Clear Button")
 
 # --- Main Dashboard ---
 try:
@@ -346,4 +348,4 @@ try:
 except Exception as e:
     st.error(f"System Error: {e}")
 
-st.caption("Amore Transient Apartment v3.6.1 | Professional Business View")
+st.caption("Amore Transient Apartment v3.6.2 | Professional Business View")
