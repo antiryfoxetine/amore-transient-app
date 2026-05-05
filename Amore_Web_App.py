@@ -2,16 +2,13 @@ import streamlit as st
 import mysql.connector
 import pandas as pd
 from datetime import datetime, timedelta
-
-# --- HOW TO RUN ---
-# Open your VS Code terminal and type:
-# python -m streamlit run Amore_Web_App.py
+import urllib.parse
 
 # --- Page Config ---
 st.set_page_config(page_title="Amore Transient Apartment", layout="wide", page_icon="🏠")
 
-# --- DATABASE & AUTH CONFIGURATION (SECURE VERSION) ---
-# We pull credentials from Streamlit's Secret vault to keep your password off GitHub.
+# --- DATABASE & AUTH CONFIGURATION (SECURE) ---
+# Pulling from Streamlit Cloud Secrets to keep your GitHub safe
 try:
     DB_CONFIG = {
         'host': st.secrets["mysql"]["host"],
@@ -28,79 +25,74 @@ except KeyError:
 def get_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
-def init_db():
-    """Creates the bookings table on Aiven if it doesn't exist yet."""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS bookings (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                guest_name VARCHAR(255) NOT NULL,
-                phone_number VARCHAR(50),
-                unit_room VARCHAR(100),
-                checkin_date VARCHAR(20),
-                checkin_time VARCHAR(20),
-                checkout_date VARCHAR(20),
-                checkout_time VARCHAR(20),
-                status VARCHAR(50)
-            )
-        """)
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        st.error(f"Cloud Connection Error: {e}")
-
-# --- Custom Styling (#507d00 Green) ---
-st.markdown(f"""
-    <style>
-    .main-header {{
-        background-color: #507d00;
-        padding: 30px;
-        border-radius: 15px;
-        color: white;
-        text-align: center;
-        margin-bottom: 25px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }}
-    .stMetric {{
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        border: 1px solid #eee;
-    }}
-    div[data-testid="stForm"] {{
-        border: 1px solid #e0e0e0;
-        border-radius: 15px;
-        padding: 20px;
-        background-color: white;
-    }}
-    </style>
-    <div class="main-header">
-        <h1 style="margin:0; font-size: 2.5rem;">AMORE TRANSIENT APARTMENT</h1>
-        <p style="margin:5px 0 0 0; opacity: 0.9;">Secure Cloud Management System</p>
-    </div>
-    """, unsafe_allow_html=True)
+# --- Google Calendar Link Generator ---
+def get_google_cal_link(guest, unit, start_dt, end_dt):
+    base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
+    fmt = "%Y%m%dT%H%M%S"
+    event_name = f"AMORE: {guest} ({unit})"
+    details = f"Guest: {guest}\nUnit: {unit}\nStatus: Confirmed\n\nSynced via Amore Business Cloud"
+    
+    params = {
+        "text": event_name,
+        "dates": f"{start_dt.strftime(fmt)}/{end_dt.strftime(fmt)}",
+        "details": details,
+        "add": "none"
+    }
+    return f"{base_url}&{urllib.parse.urlencode(params)}"
 
 # --- Login Logic ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    with st.sidebar:
-        st.subheader("🔐 Staff Login")
-        pwd = st.text_input("Enter Admin Password", type="password")
-        if st.button("Login"):
+    st.markdown("""
+        <div style="text-align: center; padding: 50px;">
+            <h1 style="color: #507d00;">🏠 AMORE TRANSIENT APARTMENT</h1>
+            <p>Please enter the staff password to access the business portal.</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        pwd = st.text_input("Staff Password", type="password")
+        if st.button("Access Dashboard", use_container_width=True):
             if pwd == APP_PASSWORD:
                 st.session_state.logged_in = True
                 st.rerun()
             else:
                 st.error("Incorrect password.")
-    st.info("Please login from the sidebar to access the booking system.")
     st.stop()
 
-# --- Overlap Logic ---
+# --- Custom Styling ---
+st.markdown("""
+    <style>
+    .main-header {
+        background-color: #507d00;
+        padding: 25px;
+        border-radius: 15px;
+        color: white;
+        text-align: center;
+        margin-bottom: 25px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .stMetric {
+        background-color: white;
+        padding: 15px;
+        border-radius: 12px;
+        border: 1px solid #f0f2f6;
+    }
+    div[data-testid="stForm"] {
+        border-radius: 15px;
+        background-color: white;
+    }
+    </style>
+    <div class="main-header">
+        <h1 style="margin:0;">AMORE TRANSIENT APARTMENT</h1>
+        <p style="margin:0; opacity: 0.8;">Amore Business Gmail Sync Portal</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# --- Overlap Logic (2-Hour Cleaning Gap) ---
 def check_overlap(unit, in_dt, out_dt, exclude_id=None):
     buffer = timedelta(hours=2)
     try:
@@ -117,38 +109,33 @@ def check_overlap(unit, in_dt, out_dt, exclude_id=None):
             exist_in = datetime.strptime(f"{row['checkin_date']} {row['checkin_time']}", "%m-%d-%Y %I:%M %p")
             exist_out = datetime.strptime(f"{row['checkout_date']} {row['checkout_time']}", "%m-%d-%Y %I:%M %p")
             if (in_dt < exist_out + buffer) and (out_dt > exist_in - buffer):
-                return f"CONFLICT: Unit {unit} is occupied by {row['guest_name']}. 2-hour cleaning gap is required!"
+                return f"CONFLICT: Unit {unit} is busy with {row['guest_name']}. 2-hour cleaning gap required!"
         return None
     except: return None
 
-# Initialize Cloud Table
-init_db()
-
-# --- App State ---
-if "edit_id" not in st.session_state: st.session_state.edit_id = None
-if "edit_val" not in st.session_state: st.session_state.edit_val = {}
-
 # --- Sidebar ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/619/619034.png", width=80)
-    st.write(f"Logged in as: **Admin**")
+    st.image("https://cdn-icons-png.flaticon.com/512/619/619034.png", width=70)
+    st.write("Logged in: **Business Admin**")
+    
     if st.button("Logout"):
         st.session_state.logged_in = False
         st.rerun()
     
     st.divider()
+    # Direct link to your Google Calendar
+    st.markdown("[🗓️ View Google Calendar](https://calendar.google.com/calendar/u/0/r/month)", unsafe_allow_html=True)
+    st.divider()
     
-    title = "✏️ Edit Record" if st.session_state.edit_id else "📝 New Booking"
+    if "edit_id" not in st.session_state: st.session_state.edit_id = None
+    if "edit_val" not in st.session_state: st.session_state.edit_val = {}
     
+    title = "✏️ Edit Booking" if st.session_state.edit_id else "➕ New Booking"
     with st.form("main_form", clear_on_submit=False):
         st.subheader(title)
-        g_val = st.session_state.edit_val.get('guest_name', "")
-        p_val = st.session_state.edit_val.get('phone_number', "")
-        u_val = st.session_state.edit_val.get('unit_room', "")
-        
-        guest = st.text_input("Guest Name", value=g_val)
-        phone = st.text_input("Phone Number", value=p_val)
-        unit = st.text_input("Unit/Room", value=u_val)
+        guest = st.text_input("Guest Name", value=st.session_state.edit_val.get('guest_name', ""))
+        phone = st.text_input("Phone Number", value=st.session_state.edit_val.get('phone_number', ""))
+        unit = st.text_input("Unit/Room", value=st.session_state.edit_val.get('unit_room', ""))
         
         c1, c2 = st.columns(2)
         in_date = c1.date_input("Check-in")
@@ -158,19 +145,18 @@ with st.sidebar:
         out_date = c3.date_input("Check-out")
         out_time = c4.time_input("Time", value=datetime.strptime("12:00", "%H:%M").time())
         
-        status_options = ["Reserved", "Booked", "Checked-in", "Checked-out"]
-        current_status = st.session_state.edit_val.get('status', "Reserved")
-        def_status_idx = status_options.index(current_status) if current_status in status_options else 0
-        
-        status = st.selectbox("Status", status_options, index=def_status_idx)
+        status_opts = ["Reserved", "Booked", "Checked-in", "Checked-out"]
+        curr_status = st.session_state.edit_val.get('status', "Reserved")
+        def_idx = status_opts.index(curr_status) if curr_status in status_opts else 0
+        status = st.selectbox("Status", status_opts, index=def_idx)
         
         btn_label = "UPDATE CLOUD" if st.session_state.edit_id else "SAVE TO CLOUD"
         if st.form_submit_button(btn_label):
             if guest and unit:
                 start_dt = datetime.combine(in_date, in_time)
                 end_dt = datetime.combine(out_date, out_time)
-                conflict = check_overlap(unit, start_dt, end_dt, exclude_id=st.session_state.edit_id)
                 
+                conflict = check_overlap(unit, start_dt, end_dt, exclude_id=st.session_state.edit_id)
                 if conflict:
                     st.error(conflict)
                 else:
@@ -187,83 +173,89 @@ with st.sidebar:
                         st.session_state.edit_id = None; st.session_state.edit_val = {}
                         st.rerun()
                     except Exception as e: st.error(e)
-            else: st.warning("Name and Unit are required.")
 
     if st.session_state.edit_id or any(st.session_state.edit_val.values()):
         if st.button("❌ Clear Form / Cancel Edit", use_container_width=True):
             st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
 
-# --- Main Board ---
+# --- Main Dashboard ---
 try:
     conn = get_connection()
     df = pd.read_sql("SELECT * FROM bookings", conn)
     conn.close()
 
     if not df.empty:
-        st.subheader("📊 Live Summary")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Reserved", len(df[df['status'] == 'Reserved']))
-        m2.metric("Checked-in", len(df[df['status'] == 'Checked-in']))
-        m3.metric("Total Active", len(df[df['status'] != 'Checked-out']))
+        # Metrics
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Occupied", len(df[df['status'] == 'Checked-in']))
+        m2.metric("Upcoming", len(df[df['status'] == 'Reserved']))
+        m3.metric("Total Records", len(df))
+        m4.metric("Active Units", df[df['status'] != 'Checked-out']['unit_room'].nunique())
 
+        # Analytics & Export
         st.divider()
+        c_left, c_right = st.columns([2, 1])
+        with c_left:
+            st.subheader("📈 Occupancy Analytics")
+            unit_counts = df['unit_room'].value_counts()
+            st.bar_chart(unit_counts, color="#507d00")
         
-        # --- Sorting and Search Controls ---
+        with c_right:
+            st.subheader("📊 Business Tools")
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Export to Excel/CSV", data=csv, file_name="amore_records.csv", mime="text/csv", use_container_width=True)
+            st.info("Regularly export this for your backup records.")
+
+        # Table with Sorting
+        st.divider()
+        st.subheader("📋 Booking Ledger")
+        
         ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 1, 1])
-        search = ctrl_col1.text_input("🔍 Search Table (Guest or Unit Number)")
-        
-        sort_map = {
-            "ID Number": "id",
-            "Guest Name": "guest_name",
-            "Unit Number": "unit_room",
-            "Check-in Date": "checkin_dt_obj",
-            "Check-out Date": "checkout_dt_obj"
-        }
-        
-        sort_by_label = ctrl_col2.selectbox("Sort By", list(sort_map.keys()))
+        search = ctrl_col1.text_input("🔍 Search Guest or Unit")
+        sort_map = {"ID": "id", "Name": "guest_name", "Unit": "unit_room", "Check-in": "checkin_dt_obj"}
+        sort_by = ctrl_col2.selectbox("Sort By", list(sort_map.keys()))
         sort_order = ctrl_col3.selectbox("Order", ["Descending", "Ascending"])
 
         df['checkin_dt_obj'] = pd.to_datetime(df['checkin_date'], format='%m-%d-%Y')
-        df['checkout_dt_obj'] = pd.to_datetime(df['checkout_date'], format='%m-%d-%Y')
-
         if search:
             df = df[df['guest_name'].str.contains(search, case=False) | df['unit_room'].str.contains(search, case=False)]
         
-        df = df.sort_values(by=sort_map[sort_by_label], ascending=(sort_order == "Ascending"))
-        display_df = df.drop(columns=['checkin_dt_obj', 'checkout_dt_obj'])
-        
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        df = df.sort_values(by=sort_map[sort_by], ascending=(sort_order == "Ascending"))
+        st.dataframe(df.drop(columns=['checkin_dt_obj']), use_container_width=True, hide_index=True)
 
+        # Management Tools
         st.divider()
-        st.subheader("🛠️ Quick Actions")
-        a1, a2, a3 = st.columns([2, 1, 1])
+        st.subheader("🛠️ Management Tools")
+        q1, q2, q3 = st.columns([2, 1, 1])
         
-        booking_options = {f"{row['guest_name']} - {row['unit_room']} (ID: {row['id']})": row['id'] for idx, row in df.iterrows()}
-        selected_label = a1.selectbox("Select a Booking to Edit or Delete", ["-- Select a Guest --"] + list(booking_options.keys()))
+        booking_options = {f"{r['guest_name']} - Unit {r['unit_room']} (ID: {r['id']})": r['id'] for _, r in df.iterrows()}
+        selected_label = q1.selectbox("Select booking to manage", ["-- Select Guest --"] + list(booking_options.keys()))
         
-        if a2.button("✏️ LOAD FOR EDIT", use_container_width=True):
-            if selected_label != "-- Select a Guest --":
-                tid = booking_options[selected_label]
-                row = df[df['id'] == tid]
-                if not row.empty:
-                    st.session_state.edit_id = tid
-                    st.session_state.edit_val = row.iloc[0].to_dict()
-                    st.rerun()
-        
-        if a3.button("🗑️ DELETE FOREVER", use_container_width=True):
-            if selected_label != "-- Select a Guest --":
-                tid = booking_options[selected_label]
-                try:
-                    conn = get_connection(); cursor = conn.cursor()
-                    cursor.execute("DELETE FROM bookings WHERE id=%s", (tid,))
-                    conn.commit(); conn.close()
-                    st.warning(f"Booking removed from Cloud.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(e)
+        if selected_label != "-- Select Guest --":
+            target_id = booking_options[selected_label]
+            row = df[df['id'] == target_id].iloc[0]
+            
+            # Link to Sync
+            s_dt = datetime.strptime(f"{row['checkin_date']} {row['checkin_time']}", "%m-%d-%Y %I:%M %p")
+            e_dt = datetime.strptime(f"{row['checkout_date']} {row['checkout_time']}", "%m-%d-%Y %I:%M %p")
+            cal_link = get_google_cal_link(row['guest_name'], row['unit_room'], s_dt, e_dt)
+            
+            q2.markdown(f'<a href="{cal_link}" target="_blank" style="text-decoration:none;"><button style="width:100%; height:45px; border-radius:10px; background-color:#4285F4; color:white; border:none; cursor:pointer; font-weight:bold;">📅 SYNC TO AMORE GMAIL</button></a>', unsafe_allow_html=True)
+            
+            if q3.button("🗑️ DELETE FOREVER", use_container_width=True):
+                conn = get_connection(); cursor = conn.cursor()
+                cursor.execute("DELETE FROM bookings WHERE id=%s", (target_id,))
+                conn.commit(); conn.close()
+                st.rerun()
+            
+            if st.button("✏️ LOAD FOR EDIT", use_container_width=True):
+                st.session_state.edit_id = target_id
+                st.session_state.edit_val = row.to_dict()
+                st.rerun()
+
     else:
         st.info("The cloud database is currently empty.")
 except Exception as e:
-    st.error(f"Cloud Connection Failed: {e}")
+    st.error(f"System Error: {e}")
 
-st.caption("Amore Transient Apartment v2.6 | Secured Cloud Version")
+st.caption("Amore Transient Apartment v2.8 | Secure Business Portal")
