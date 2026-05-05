@@ -45,9 +45,17 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
+    # Display logo on login page if it exists
+    col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
+    with col_l2:
+        if os.path.exists("logo.png"):
+            st.image("logo.png", use_container_width=True)
+        else:
+            st.markdown("<h1 style='text-align: center;'>🏠</h1>", unsafe_allow_html=True)
+
     st.markdown("""
-        <div style="text-align: center; padding: 50px;">
-            <h1 style="color: #507d00; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">🏠 AMORE TRANSIENT APARTMENT</h1>
+        <div style="text-align: center; padding-bottom: 20px;">
+            <h1 style="color: #507d00; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin-top: 0;">AMORE TRANSIENT APARTMENT</h1>
             <p style="color: #666;">Secure Management Portal</p>
         </div>
     """, unsafe_allow_html=True)
@@ -117,13 +125,9 @@ def check_overlap(unit, in_dt, out_dt, exclude_id=None):
 
 # --- Sidebar ---
 with st.sidebar:
-    # --- LOGO SECTION ---
-    # To use your own photo: Upload it to GitHub as 'logo.png' in the same folder as this script.
-    # The code below will automatically check if the file exists!
     if os.path.exists("logo.png"):
-        st.image("logo.png", width=150)
+        st.image("logo.png", use_container_width=True)
     else:
-        # Fallback to a nice high-quality house icon if no logo.png is found
         st.image("https://cdn-icons-png.flaticon.com/512/619/619034.png", width=100)
     
     st.write("Logged in: **Business Admin**")
@@ -187,6 +191,9 @@ with st.sidebar:
     if st.session_state.edit_id or any(st.session_state.edit_val.values()):
         if st.button("❌ Clear Form", use_container_width=True):
             st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
+    
+    st.v_spacer(size=2)
+    st.caption("v3.2 | Updated May 2026")
 
 # --- Main Dashboard ---
 try:
@@ -267,4 +274,4 @@ try:
 except Exception as e:
     st.error(f"System Error: {e}")
 
-st.caption("Amore Transient Apartment v3.0 | Secured & Live")
+st.caption("Amore Transient Apartment v3.2 | Secured & Live")
