@@ -25,6 +25,26 @@ except KeyError:
 def get_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
+# --- AUTO-FIX DATABASE SCHEMA ---
+# This function fixes the "num_guests not in index" error by adding the column if it's missing
+def repair_database():
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        # Check if num_guests column exists
+        cursor.execute("SHOW COLUMNS FROM bookings LIKE 'num_guests'")
+        result = cursor.fetchone()
+        if not result:
+            # Column is missing, add it!
+            cursor.execute("ALTER TABLE bookings ADD COLUMN num_guests INT DEFAULT 1 AFTER phone_number")
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        pass # Silently fail if there's an issue; the app will catch it later
+
+# Run repair on startup
+repair_database()
+
 # --- Google Calendar Link Generator ---
 def get_google_cal_link(guest, phone, unit, start_dt, end_dt, guests, is_long_term=False):
     base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
@@ -193,7 +213,7 @@ with st.sidebar:
 
     if st.button("❌ Clear Form", use_container_width=True):
         st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
-    st.caption("v3.8 | MM-DD-YYYY & Headcount Ready")
+    st.caption("v3.9 | MM-DD-YYYY & Auto-Repair Schema")
 
 # --- Dashboard ---
 try:
@@ -225,7 +245,17 @@ try:
         
         ctrl1, ctrl2, ctrl3 = st.columns([2, 1, 1])
         search = ctrl1.text_input("🔍 Search")
-        sort_map = {"UNIT": "unit_room", "GUEST": "guest_name", "GUESTS (HEAD)": "num_guests", "CHECK IN": "checkin_dt_obj", "STATUS": "status"}
+        
+        # Ensure 'num_guests' is treated as a column in sort logic even if empty
+        if 'num_guests' not in df.columns: df['num_guests'] = 1
+            
+        sort_map = {
+            "UNIT": "unit_room", 
+            "GUEST": "guest_name", 
+            "GUESTS (HEAD)": "num_guests", 
+            "CHECK IN": "checkin_dt_obj", 
+            "STATUS": "status"
+        }
         sort_by = ctrl2.selectbox("Sort By", list(sort_map.keys()))
         sort_order = ctrl3.selectbox("Order", ["Ascending", "Descending"])
 
@@ -233,14 +263,22 @@ try:
         if search: df = df[df['guest_name'].str.contains(search, case=False) | df['unit_room'].str.contains(search, case=False)]
         df = df.sort_values(by=sort_map.get(sort_by, 'checkin_dt_obj'), ascending=(sort_order == "Ascending"))
 
-        # Final table layout
-        display_df = df[[
+        # Final table layout with proper column renaming
+        cols_to_show = [
             'unit_room', 'guest_name', 'phone_number', 'num_guests',
             'checkin_date', 'checkin_time', 'checkout_date', 'checkout_time', 'status'
-        ]].rename(columns={
-            'unit_room': 'UNIT', 'guest_name': 'GUEST', 'phone_number': 'PHONE NUMBER',
-            'num_guests': 'GUESTS (HEAD)', 'checkin_date': 'CHECK IN DATE', 'checkin_time': 'CHECK IN TIME',
-            'checkout_date': 'CHECK OUT DATE', 'checkout_time': 'CHECK OUT TIME', 'status': 'STATUS'
+        ]
+        
+        display_df = df[cols_to_show].rename(columns={
+            'unit_room': 'UNIT', 
+            'guest_name': 'GUEST', 
+            'phone_number': 'PHONE NUMBER',
+            'num_guests': 'GUESTS (HEAD)', 
+            'checkin_date': 'CHECK IN DATE', 
+            'checkin_time': 'CHECK IN TIME',
+            'checkout_date': 'CHECK OUT DATE', 
+            'checkout_time': 'CHECK OUT TIME', 
+            'status': 'STATUS'
         })
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
@@ -267,5 +305,5 @@ try:
             if st.button("✏️ LOAD FOR EDIT", use_container_width=True):
                 st.session_state.edit_id = tid; st.session_state.edit_val = row.to_dict(); st.rerun()
     else: st.info("Cloud is empty.")
-except Exception as e: st.error(f"Error: {e}")
-st.caption("Amore Transient Apartment v3.8 | Ry Edition")
+except Exception as e: st.error(f"System Error: {e}")
+st.caption("Amore Transient Apartment v3.9 | Ry Edition")
