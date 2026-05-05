@@ -8,7 +8,7 @@ import os
 # --- Page Config ---
 st.set_page_config(page_title="Amore Transient Apartment", layout="wide", page_icon="🏠")
 
-# --- DATABASE & AUTH CONFIGURATION (SECURE) ---
+# --- DATABASE & AUTH CONFIGURATION ---
 try:
     DB_CONFIG = {
         'host': st.secrets["mysql"]["host"],
@@ -26,17 +26,13 @@ def get_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
 # --- Google Calendar Link Generator ---
-def get_google_cal_link(guest, phone, unit, start_dt, end_dt, is_long_term=False):
+def get_google_cal_link(guest, phone, unit, start_dt, end_dt, guests, is_long_term=False):
     base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
     fmt = "%Y%m%dT%H%M%S"
     
-    if is_long_term:
-        end_dt = start_dt + timedelta(days=30)
-        event_name = f"LONG-TERM: {guest} ({unit})"
-    else:
-        event_name = f"AMORE: {guest} ({unit})"
-        
-    details = f"Guest: {guest}\nPhone: {phone}\nUnit: {unit}\nType: Long-term Rental" if is_long_term else f"Guest: {guest}\nPhone: {phone}\nUnit: {unit}"
+    event_name = f"LONG-TERM: {guest} ({unit})" if is_long_term else f"AMORE: {guest} ({unit})"
+    details = f"Guest: {guest}\nPhone: {phone}\nUnit: {unit}\nHeadcount: {guests} person(s)"
+    if is_long_term: details += "\nStatus: Long-term Rental"
     details += "\n\nSynced via Amore Business Cloud"
     
     params = {
@@ -108,54 +104,40 @@ st.markdown("""
     </div>
     """, unsafe_allow_html=True)
 
-# --- Overlap Logic (2-Hour Cleaning Gap) ---
+# --- Overlap Logic ---
 def check_overlap(unit, in_dt, out_dt, exclude_id=None, is_long_term=False):
     buffer = timedelta(hours=2)
     try:
-        conn = get_connection()
-        cursor = conn.cursor(dictionary=True)
+        conn = get_connection(); cursor = conn.cursor(dictionary=True)
         query = "SELECT * FROM bookings WHERE unit_room = %s AND status != 'Checked-out'"
-        if exclude_id:
-            query += f" AND id != {exclude_id}"
+        if exclude_id: query += f" AND id != {exclude_id}"
         cursor.execute(query, (unit,))
-        rows = cursor.fetchall()
-        conn.close()
+        rows = cursor.fetchall(); conn.close()
 
         for row in rows:
             exist_in = datetime.strptime(f"{row['checkin_date']} {row['checkin_time']}", "%m-%d-%Y %I:%M %p")
-            
-            if row['checkout_date'] == "Long-term" or row['status'] == "Long-term":
+            if row['checkout_date'] == "Long-term":
                 if out_dt > exist_in - buffer:
                     return f"CONFLICT: Unit {unit} has a Long-term resident ({row['guest_name']})."
                 continue
-
             exist_out = datetime.strptime(f"{row['checkout_date']} {row['checkout_time']}", "%m-%d-%Y %I:%M %p")
-            
-            if is_long_term:
-                if in_dt < exist_out + buffer:
-                    return f"CONFLICT: Unit {unit} is busy with {row['guest_name']} until {row['checkout_date']}."
-            else:
-                if (in_dt < exist_out + buffer) and (out_dt > exist_in - buffer):
-                    return f"CONFLICT: Unit {unit} is busy with {row['guest_name']}. 2-hour cleaning gap required!"
+            if (in_dt < exist_out + buffer) and (out_dt > exist_in - buffer):
+                return f"CONFLICT: Unit {unit} is busy with {row['guest_name']}."
         return None
     except: return None
 
 # --- Sidebar ---
 with st.sidebar:
-    if os.path.exists("logo.png"):
-        st.image("logo.png", use_container_width=True)
-    else:
-        st.image("https://cdn-icons-png.flaticon.com/512/619/619034.png", width=100)
+    if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
+    else: st.image("https://cdn-icons-png.flaticon.com/512/619/619034.png", width=100)
     
     st.write("Logged in: **Business Admin**")
-    
     if st.button("Logout", use_container_width=True):
         st.session_state.logged_in = False
         st.rerun()
     
     st.divider()
     st.markdown("[🗓️ View Google Calendar](https://calendar.google.com/calendar/u/0/r/month)", unsafe_allow_html=True)
-    st.caption("Tip: Keep this tab open to avoid logging in again.")
     st.divider()
     
     if "edit_id" not in st.session_state: st.session_state.edit_id = None
@@ -166,68 +148,54 @@ with st.sidebar:
         st.subheader(title)
         guest = st.text_input("Guest Name", value=st.session_state.edit_val.get('guest_name', ""))
         phone = st.text_input("Phone Number", value=st.session_state.edit_val.get('phone_number', ""))
+        guests_head = st.number_input("Number of Guests (Per head)", min_value=1, step=1, value=int(st.session_state.edit_val.get('num_guests', 1)))
         unit = st.text_input("Unit/Room", value=st.session_state.edit_val.get('unit_room', ""))
         
         c1, c2 = st.columns(2)
-        in_date = c1.date_input("Check-in")
+        in_date = c1.date_input("Check-in", format="MM/DD/YYYY")
         in_time = c2.time_input("Time", value=datetime.strptime("14:00", "%H:%M").time())
         
-        # --- Long Term Toggle ---
-        is_lt_val = (st.session_state.edit_val.get('status') == "Long-term" or st.session_state.edit_val.get('checkout_date') == "Long-term")
-        is_long_term = st.checkbox("Long-term Rental (No fixed check-out)", value=is_lt_val)
+        is_lt = (st.session_state.edit_val.get('checkout_date') == "Long-term")
+        long_term = st.checkbox("Long-term Rental (No fixed check-out)", value=is_lt)
         
         c3, c4 = st.columns(2)
-        out_date = c3.date_input("Check-out", disabled=is_long_term)
-        out_time = c4.time_input("Time", value=datetime.strptime("12:00", "%H:%M").time(), disabled=is_long_term)
+        out_date = c3.date_input("Check-out", format="MM/DD/YYYY", disabled=long_term)
+        out_time = c4.time_input("Time", value=datetime.strptime("12:00", "%H:%M").time(), disabled=long_term)
         
         status_opts = ["Reserved", "Booked", "Checked-in", "Checked-out", "Long-term"]
-        curr_status = "Long-term" if is_long_term else st.session_state.edit_val.get('status', "Reserved")
-        def_idx = status_opts.index(curr_status) if curr_status in status_opts else 0
-        status = st.selectbox("Status", status_opts, index=def_idx, disabled=is_long_term)
+        def_status = "Long-term" if long_term else st.session_state.edit_val.get('status', "Reserved")
+        status = st.selectbox("Status", status_opts, index=status_opts.index(def_status) if def_status in status_opts else 0, disabled=long_term)
         
-        btn_label = "UPDATE CLOUD" if st.session_state.edit_id else "SAVE TO CLOUD"
-        if st.form_submit_button(btn_label, use_container_width=True):
+        if st.form_submit_button("SAVE TO CLOUD", use_container_width=True):
             if guest and unit:
                 start_dt = datetime.combine(in_date, in_time)
-                
-                if is_long_term:
-                    end_dt = start_dt + timedelta(days=3650) 
-                    cout_d_str = "Long-term"
-                    cout_t_str = "N/A"
-                    final_status = "Long-term"
+                if long_term:
+                    end_dt = start_dt + timedelta(days=3650)
+                    cout_d, cout_t, f_status = "Long-term", "N/A", "Long-term"
                 else:
                     end_dt = datetime.combine(out_date, out_time)
-                    cout_d_str = end_dt.strftime("%m-%d-%Y")
-                    cout_t_str = end_dt.strftime("%I:%M %p")
-                    final_status = status
+                    cout_d, cout_t, f_status = end_dt.strftime("%m-%d-%Y"), end_dt.strftime("%I:%M %p"), status
                 
-                conflict = check_overlap(unit, start_dt, end_dt, exclude_id=st.session_state.edit_id, is_long_term=is_long_term)
-                if conflict:
-                    st.error(conflict)
+                conflict = check_overlap(unit, start_dt, end_dt, exclude_id=st.session_state.edit_id, is_long_term=long_term)
+                if conflict: st.error(conflict)
                 else:
                     try:
                         conn = get_connection(); cursor = conn.cursor()
                         if st.session_state.edit_id:
-                            sql = "UPDATE bookings SET guest_name=%s, phone_number=%s, unit_room=%s, checkin_date=%s, checkin_time=%s, checkout_date=%s, checkout_time=%s, status=%s WHERE id=%s"
-                            cursor.execute(sql, (guest, phone, unit, start_dt.strftime("%m-%d-%Y"), start_dt.strftime("%I:%M %p"), cout_d_str, cout_t_str, final_status, st.session_state.edit_id))
+                            sql = "UPDATE bookings SET guest_name=%s, phone_number=%s, num_guests=%s, unit_room=%s, checkin_date=%s, checkin_time=%s, checkout_date=%s, checkout_time=%s, status=%s WHERE id=%s"
+                            cursor.execute(sql, (guest, phone, guests_head, unit, start_dt.strftime("%m-%d-%Y"), start_dt.strftime("%I:%M %p"), cout_d, cout_t, f_status, st.session_state.edit_id))
                         else:
-                            sql = "INSERT INTO bookings (guest_name, phone_number, unit_room, checkin_date, checkin_time, checkout_date, checkout_time, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
-                            cursor.execute(sql, (guest, phone, unit, start_dt.strftime("%m-%d-%Y"), start_dt.strftime("%I:%M %p"), cout_d_str, cout_t_str, final_status))
+                            sql = "INSERT INTO bookings (guest_name, phone_number, num_guests, unit_room, checkin_date, checkin_time, checkout_date, checkout_time, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                            cursor.execute(sql, (guest, phone, guests_head, unit, start_dt.strftime("%m-%d-%Y"), start_dt.strftime("%I:%M %p"), cout_d, cout_t, f_status))
                         conn.commit(); conn.close()
-                        st.success("Synced!")
-                        st.session_state.edit_id = None; st.session_state.edit_val = {}
-                        st.rerun()
-                    except Exception as e: st.error(e)
+                        st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
+                    except Exception as e: st.error(f"Error: {e}")
 
-    # RESTORED: Clear Form button is now persistent and always visible
     if st.button("❌ Clear Form", use_container_width=True):
-        st.session_state.edit_id = None
-        st.session_state.edit_val = {}
-        st.rerun()
-    
-    st.caption("v3.6.2 | Persistent Clear Button")
+        st.session_state.edit_id = None; st.session_state.edit_val = {}; st.rerun()
+    st.caption("v3.8 | MM-DD-YYYY & Headcount Ready")
 
-# --- Main Dashboard ---
+# --- Dashboard ---
 try:
     conn = get_connection()
     df = pd.read_sql("SELECT * FROM bookings", conn)
@@ -246,106 +214,58 @@ try:
         c_left, c_right = st.columns([2, 1])
         with c_left:
             st.subheader("📈 Occupancy Insights")
-            unit_counts = df['unit_room'].value_counts()
-            st.bar_chart(unit_counts, color="#507d00")
-        
+            st.bar_chart(df['unit_room'].value_counts(), color="#507d00")
         with c_right:
             st.subheader("📊 Business Data")
             csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Export to Excel/CSV", data=csv, file_name="amore_records.csv", mime="text/csv", use_container_width=True)
-            st.info("Download monthly for your records.")
+            st.download_button("📥 Export to Excel/CSV", data=csv, file_name="amore_records.csv", use_container_width=True)
 
-        # --- TABLE FORMATTING ---
         st.divider()
         st.subheader("📋 Booking Ledger")
         
         ctrl1, ctrl2, ctrl3 = st.columns([2, 1, 1])
-        search = ctrl1.text_input("🔍 Search Table")
-        
-        # RESTORED SORTING OPTIONS
-        sort_map = {
-            "Unit": "unit_room", 
-            "Guest": "guest_name", 
-            "Check In": "checkin_dt_obj", 
-            "Check Out": "checkout_dt_obj",
-            "Status": "status"
-        }
+        search = ctrl1.text_input("🔍 Search")
+        sort_map = {"UNIT": "unit_room", "GUEST": "guest_name", "GUESTS (HEAD)": "num_guests", "CHECK IN": "checkin_dt_obj", "STATUS": "status"}
         sort_by = ctrl2.selectbox("Sort By", list(sort_map.keys()))
         sort_order = ctrl3.selectbox("Order", ["Ascending", "Descending"])
 
-        # Helper for date sorting
         df['checkin_dt_obj'] = pd.to_datetime(df['checkin_date'], format='%m-%d-%Y')
-        df['checkout_dt_obj'] = pd.to_datetime(
-            df['checkout_date'].replace('Long-term', '12-31-2099'), 
-            format='%m-%d-%Y'
-        )
-
-        if search:
-            df = df[df['guest_name'].str.contains(search, case=False) | df['unit_room'].str.contains(search, case=False)]
-        
+        if search: df = df[df['guest_name'].str.contains(search, case=False) | df['unit_room'].str.contains(search, case=False)]
         df = df.sort_values(by=sort_map.get(sort_by, 'checkin_dt_obj'), ascending=(sort_order == "Ascending"))
 
-        # Display columns as requested
+        # Final table layout
         display_df = df[[
-            'unit_room', 
-            'guest_name', 
-            'phone_number', 
-            'checkin_date',
-            'checkin_time',
-            'checkout_date',
-            'checkout_time',
-            'status'
+            'unit_room', 'guest_name', 'phone_number', 'num_guests',
+            'checkin_date', 'checkin_time', 'checkout_date', 'checkout_time', 'status'
         ]].rename(columns={
-            'unit_room': 'UNIT',
-            'guest_name': 'GUEST',
-            'phone_number': 'PHONE NUMBER',
-            'checkin_date': 'CHECK IN DATE',
-            'checkin_time': 'CHECK IN TIME',
-            'checkout_date': 'CHECK OUT DATE',
-            'checkout_time': 'CHECK OUT TIME',
-            'status': 'STATUS'
+            'unit_room': 'UNIT', 'guest_name': 'GUEST', 'phone_number': 'PHONE NUMBER',
+            'num_guests': 'GUESTS (HEAD)', 'checkin_date': 'CHECK IN DATE', 'checkin_time': 'CHECK IN TIME',
+            'checkout_date': 'CHECK OUT DATE', 'checkout_time': 'CHECK OUT TIME', 'status': 'STATUS'
         })
-        
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-        # Management Tools
+        # Tools
         st.divider()
         st.subheader("🛠️ Management Tools")
         q1, q2, q3 = st.columns([2, 1, 1])
-        
-        booking_options = {f"{r['guest_name']} - Unit {r['unit_room']} (ID: {r['id']})": r['id'] for _, r in df.iterrows()}
-        selected_label = q1.selectbox("Select a guest to manage", ["-- Select Guest --"] + list(booking_options.keys()))
+        booking_options = {f"{r['guest_name']} - {r['unit_room']} (ID: {r['id']})": r['id'] for _, r in df.iterrows()}
+        selected_label = q1.selectbox("Select Record", ["-- Select Guest --"] + list(booking_options.keys()))
         
         if selected_label != "-- Select Guest --":
-            target_id = booking_options[selected_label]
-            row = df[df['id'] == target_id].iloc[0]
-            
+            tid = booking_options[selected_label]; row = df[df['id'] == tid].iloc[0]
             s_dt = datetime.strptime(f"{row['checkin_date']} {row['checkin_time']}", "%m-%d-%Y %I:%M %p")
-            is_lt = (row['status'] == "Long-term" or row['checkout_date'] == "Long-term")
+            is_lt = (row['checkout_date'] == "Long-term")
+            e_dt = s_dt + timedelta(days=30) if is_lt else datetime.strptime(f"{row['checkout_date']} {row['checkout_time']}", "%m-%d-%Y %I:%M %p")
             
-            if is_lt:
-                e_dt = s_dt + timedelta(days=30)
-            else:
-                e_dt = datetime.strptime(f"{row['checkout_date']} {row['checkout_time']}", "%m-%d-%Y %I:%M %p")
+            cal_url = get_google_cal_link(row['guest_name'], row['phone_number'], row['unit_room'], s_dt, e_dt, row.get('num_guests', 1), is_lt)
+            q2.markdown(f'<a href="{cal_url}" target="_blank" style="text-decoration:none;"><button style="width:100%; height:45px; border-radius:10px; background-color:#4285F4; color:white; border:none; cursor:pointer; font-weight:bold;">📅 SYNC CALENDAR</button></a>', unsafe_allow_html=True)
             
-            cal_link = get_google_cal_link(row['guest_name'], row['phone_number'], row['unit_room'], s_dt, e_dt, is_long_term=is_lt)
-            
-            q2.markdown(f'<a href="{cal_link}" target="_blank" style="text-decoration:none;"><button style="width:100%; height:45px; border-radius:10px; background-color:#4285F4; color:white; border:none; cursor:pointer; font-weight:bold;">📅 SYNC TO AMORE GMAIL</button></a>', unsafe_allow_html=True)
-            
-            if q3.button("🗑️ DELETE FOREVER", use_container_width=True):
+            if q3.button("🗑️ DELETE", use_container_width=True):
                 conn = get_connection(); cursor = conn.cursor()
-                cursor.execute("DELETE FROM bookings WHERE id=%s", (target_id,))
-                conn.commit(); conn.close()
-                st.rerun()
-            
+                cursor.execute("DELETE FROM bookings WHERE id=%s", (tid,))
+                conn.commit(); conn.close(); st.rerun()
             if st.button("✏️ LOAD FOR EDIT", use_container_width=True):
-                st.session_state.edit_id = target_id
-                st.session_state.edit_val = row.to_dict()
-                st.rerun()
-
-    else:
-        st.info("Cloud database is empty.")
-except Exception as e:
-    st.error(f"System Error: {e}")
-
-st.caption("Amore Transient Apartment v3.6.2 | Professional Business View")
+                st.session_state.edit_id = tid; st.session_state.edit_val = row.to_dict(); st.rerun()
+    else: st.info("Cloud is empty.")
+except Exception as e: st.error(f"Error: {e}")
+st.caption("Amore Transient Apartment v3.8 | Ry Edition")
