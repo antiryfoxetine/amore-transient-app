@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 # --- Page Config ---
 st.set_page_config(page_title="Amore Transient Apartment", layout="wide", page_icon="🏠")
 
-# --- DATABASE CONFIGURATION (SECURE VERSION) ---
-# Pulling credentials from Streamlit's Secret vault to keep your password off GitHub.
+# --- DATABASE & AUTH CONFIGURATION (SECURE VERSION) ---
+# We pull credentials from Streamlit's Secret vault to keep your password off GitHub.
 try:
     DB_CONFIG = {
         'host': st.secrets["mysql"]["host"],
@@ -20,8 +20,9 @@ try:
         'password': st.secrets["mysql"]["password"],
         'database': st.secrets["mysql"]["database"]
     }
+    APP_PASSWORD = st.secrets["auth"]["password"]
 except KeyError:
-    st.error("Secrets not configured! Please add [mysql] settings in Streamlit Cloud.")
+    st.error("Secrets not configured! Please add [mysql] and [auth] settings in Streamlit Cloud.")
     st.stop()
 
 def get_connection():
@@ -82,6 +83,23 @@ st.markdown(f"""
     </div>
     """, unsafe_allow_html=True)
 
+# --- Login Logic ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    with st.sidebar:
+        st.subheader("🔐 Staff Login")
+        pwd = st.text_input("Enter Admin Password", type="password")
+        if st.button("Login"):
+            if pwd == APP_PASSWORD:
+                st.session_state.logged_in = True
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
+    st.info("Please login from the sidebar to access the booking system.")
+    st.stop()
+
 # --- Overlap Logic ---
 def check_overlap(unit, in_dt, out_dt, exclude_id=None):
     buffer = timedelta(hours=2)
@@ -113,6 +131,13 @@ if "edit_val" not in st.session_state: st.session_state.edit_val = {}
 # --- Sidebar ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/619/619034.png", width=80)
+    st.write(f"Logged in as: **Admin**")
+    if st.button("Logout"):
+        st.session_state.logged_in = False
+        st.rerun()
+    
+    st.divider()
+    
     title = "✏️ Edit Record" if st.session_state.edit_id else "📝 New Booking"
     
     with st.form("main_form", clear_on_submit=False):
@@ -241,4 +266,4 @@ try:
 except Exception as e:
     st.error(f"Cloud Connection Failed: {e}")
 
-st.caption("Amore Transient Apartment v2.5 | Secured Cloud Version")
+st.caption("Amore Transient Apartment v2.6 | Secured Cloud Version")
